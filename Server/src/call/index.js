@@ -1,4 +1,5 @@
-import { Client } from "plivo";
+
+import { Client } from "plivo"
 import WebSocket, { WebSocketServer } from 'ws';
 import express from "express";
 import http from 'http';
@@ -12,7 +13,7 @@ import cors from "cors";
 dotenv.config();
 const app = express();
 app.use(cors({
-    origin: ['http://localhost:8081', 'http://localhost:5173', 'http://localhost:3000', 'https://eceafd0183fa.ngrok-free.app'],
+    origin: ['http://localhost:8081', 'http://localhost:5173', 'http://localhost:3000', 'https://072f8054aa19.ngrok-free.app'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'OPTIONS', 'DELETE'],
     allowedHeaders: ['Content-Type', 'ngrok-skip-browser-warning', 'Authorization']
@@ -97,9 +98,13 @@ async function initializeMongoDB() {
         await mongoClient.connect();
         db = mongoClient.db('voxora');
         
+        console.log('✅ MongoDB connected successfully to voxora database');
+        
         await createCollections();
         await cleanupOldIndexes();
         await createNewIndexes();
+        
+        console.log('✅ MongoDB initialization complete');
         
     } catch (error) {
         console.error('❌ Failed to connect to MongoDB:', error);
@@ -112,22 +117,33 @@ async function createCollections() {
         const collectionNames = collections.map(c => c.name);
         
         if (!collectionNames.includes('call_transcripts')) {
+            console.log('🔧 Creating call_transcripts collection...');
             await db.createCollection('call_transcripts');
+            console.log('✅ Created call_transcripts collection');
         } else {
+            console.log('📊 call_transcripts collection already exists');
             callTranscriptsCollection = db.collection('call_transcripts');
         }
         
         if (!collectionNames.includes('inbound_transcripts')) {
+            console.log('🔧 Creating inbound_transcripts collection...');
             await db.createCollection('inbound_transcripts');
+            console.log('✅ Created inbound_transcripts collection');
         } else {
+            console.log('📊 inbound_transcripts collection already exists');
             inboundTranscriptsCollection = db.collection('inbound_transcripts');
         }
         
         if (!collectionNames.includes('appointments')) {
+            console.log('🔧 Creating appointments collection...');
             await db.createCollection('appointments');
+            console.log('✅ Created appointments collection');
         } else {
+            console.log('📊 appointments collection already exists');
             appointmentsCollection = db.collection('appointments');
         }
+        
+        console.log('✅ Collections initialized successfully');
         
     } catch (error) {
         console.error('❌ Error creating collections:', error);
@@ -141,7 +157,9 @@ async function cleanupOldIndexes() {
             if (index.name !== '_id_') {
                 try {
                     await callTranscriptsCollection.dropIndex(index.name);
-                } catch (error) {}
+                } catch (error) {
+                    console.log(`⚠️ Could not drop index ${index.name}:`, error.message);
+                }
             }
         }
         
@@ -150,14 +168,20 @@ async function cleanupOldIndexes() {
             if (index.name !== '_id_') {
                 try {
                     await inboundTranscriptsCollection.dropIndex(index.name);
-                } catch (error) {}
+                } catch (error) {
+                    console.log(`⚠️ Could not drop index ${index.name}:`, error.message);
+                }
             }
         }
-    } catch (error) {}
+    } catch (error) {
+        console.log('⚠️ Index cleanup note:', error.message);
+    }
 }
 
 async function createNewIndexes() {
-    try {        
+    try {
+        console.log('🔧 Creating new indexes...');
+        
         // Indexes for call_transcripts (OUTBOUND)
         await callTranscriptsCollection.createIndex({ requestUuid: 1 }, { 
             unique: true,
@@ -205,6 +229,8 @@ async function createNewIndexes() {
         await appointmentsCollection.createIndex({ phoneNumber: 1 }, { name: 'appointments_phone_index' });
         await appointmentsCollection.createIndex({ createdAt: 1 }, { name: 'appointments_created_index' });
         await appointmentsCollection.createIndex({ date: 1 }, { name: 'appointments_date_index' });
+        
+        console.log('✅ All indexes created successfully');
         
     } catch (error) {
         console.error('❌ Index creation error:', error.message);
@@ -495,13 +521,17 @@ async function getTranscript(requestUuid, isInbound = true) {
 }
 
 async function storeAppointmentInMongoDB(appointmentData) {
+    console.log('📅 STORE APPOINTMENT: Storing appointment:', appointmentData);
+    
     if (!appointmentsCollection) {
+        console.log('🔄 STORE APPOINTMENT: Initializing appointments collection...');
         if (db) {
             appointmentsCollection = db.collection('appointments');
         }
     }
     
     if (!appointmentsCollection) {
+        console.error('❌ STORE APPOINTMENT: MongoDB not configured.');
         return { 
             success: false, 
             message: 'Database not configured' 
@@ -514,12 +544,23 @@ async function storeAppointmentInMongoDB(appointmentData) {
         todayIST.setHours(0, 0, 0, 0);
 
         if (appointmentDate < todayIST) {
+            console.log('❌ APPOINTMENT DATE IS IN THE PAST');
             return { 
                 success: false, 
                 message: 'Appointment date must be in the future' 
             };
         }
 
+        const appointmentRecord = {
+            ...appointmentData,
+            status: 'confirmed',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            timezone: 'IST',
+            storedAt: new Date().toISOString(),
+            storedAtIST: getCurrentISTDate().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+        };
+        
         const result = await appointmentsCollection.insertOne({
             ...appointmentData,
             status: 'pending',
@@ -530,12 +571,15 @@ async function storeAppointmentInMongoDB(appointmentData) {
             storedAtIST: getCurrentISTDate().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
         });
         
+        console.log('✅ STORE APPOINTMENT: Appointment stored with ID:', result.insertedId);
+        
         return { 
             success: true, 
             message: 'Appointment stored successfully',
             appointmentId: result.insertedId
         };
     } catch (error) {
+        console.error('❌ STORE APPOINTMENT: Error storing appointment:', error);
         return { 
             success: false, 
             message: 'Failed to store appointment in database',
@@ -546,7 +590,10 @@ async function storeAppointmentInMongoDB(appointmentData) {
 
 const TOOLS = {
     book_appointment: async ({ name, date, purpose, phoneNumber, requestUuid }) => {
+        console.log("=== APPOINTMENT BOOKING STARTED ===");
+
         if (!name || !date || !purpose) {
+            console.log("❌ APPOINTMENT BOOKING: Missing required details");
             return "Missing required appointment details. Please provide name, date, and purpose.";
         }
 
@@ -554,6 +601,7 @@ const TOOLS = {
         let appointmentDate = chrono.parseDate(date, nowIST, { forwardDate: true });
         
         if (!appointmentDate) {
+            console.log("❌ APPOINTMENT BOOKING: Could not parse date");
             return "I couldn't understand the date. Please say something like 'tomorrow' or '26 October 2025'.";
         }
 
@@ -564,10 +612,12 @@ const TOOLS = {
         todayIST.setHours(0, 0, 0, 0);
 
         if (appointmentDateIST <= todayIST) {
+            console.log("❌ APPOINTMENT BOOKING: Date is not in the future");
             return "Appointment date must be in the future.";
         }
 
         const dateString = getISTDateString(appointmentDate);
+        console.log("📅 Formatted date string:", dateString);
 
         const appointmentData = {
             name: name.trim(),
@@ -580,12 +630,17 @@ const TOOLS = {
             createdFromCall: true
         };
 
+        console.log("📅 APPOINTMENT DATA TO STORE:", appointmentData);
+
         const storageResult = await storeAppointmentInMongoDB(appointmentData);
+        console.log("📅 STORAGE RESULT:", storageResult);
 
         if (storageResult.success) {
             const formattedDisplayDate = formatISTDate(appointmentDateIST);
+            console.log("✅ APPOINTMENT BOOKING: Successfully stored");
             return `Appointment successfully booked for ${name}! Date: ${formattedDisplayDate}, Purpose: ${purpose}. Your appointment ID is ${storageResult.appointmentId}.`;
         } else {
+            console.log("❌ APPOINTMENT BOOKING: Failed to store");
             return `Appointment details recorded for ${name}, but there was an issue storing the appointment. Please contact support. Error: ${storageResult.message}`;
         }
     }
@@ -597,7 +652,10 @@ app.get('/', async (request, reply) => {
 });
 
 app.get('/api/appointments', async (request, reply) => {
+    console.log('🔄 GET ALL APPOINTMENTS: Request received');
+    
     if (!appointmentsCollection) {
+        console.log('❌ GET ALL APPOINTMENTS: appointmentsCollection not initialized');
         return reply.status(500).send({ error: 'Database not configured' });
     }
 
@@ -614,6 +672,8 @@ app.get('/api/appointments', async (request, reply) => {
         
         const total = await appointmentsCollection.countDocuments({});
         
+        console.log(`✅ GET ALL APPOINTMENTS: Found ${appointments.length} appointments`);
+        
         return reply.send({
             success: true,
             count: appointments.length,
@@ -623,6 +683,7 @@ app.get('/api/appointments', async (request, reply) => {
             appointments: appointments
         });
     } catch (error) {
+        console.error('❌ GET ALL APPOINTMENTS: Error:', error);
         return reply.status(500).send({ 
             success: false, 
             error: 'Failed to fetch appointments',
@@ -633,16 +694,27 @@ app.get('/api/appointments', async (request, reply) => {
 
 // ========== CRITICAL FIX: Modified inbound call handler ==========
 app.post("/incoming-call", async (request, reply) => {
+    console.log('🔍 INCOMING CALL WEBHOOK (Plivo):');
+    console.log('📦 Request body:', JSON.stringify(request.body, null, 2));
+    
     const fromNumber = request.body.From;
     const requestUuid = request.body.requestUuid || request.body.CallUUID || request.body.ALegUUID || request.body.RequestUUID || `plivo_${Date.now()}`;
     const callStatus = request.body.CallStatus || request.body.Event || 'in-progress';
     const direction = request.body.Direction || 'inbound';
+    
+    console.log('📞 PLIVO CALL DETAILS:');
+    console.log('  From:', fromNumber);
+    console.log('  requestUuid:', requestUuid);
+    console.log('  Status:', callStatus);
+    console.log('  Direction:', direction);
     
     // ========== KEY FIX ==========
     // Determine if this is inbound or outbound based on Direction
     // Outbound calls initiated by us will have direction: 'outbound'
     // Inbound calls from external numbers will have direction: 'inbound'
     const isInbound = direction === 'inbound';
+    
+    console.log(`📊 DETECTED CALL TYPE: ${isInbound ? 'INBOUND' : 'OUTBOUND'}`);
     
     if (callStatus === 'in-progress' || callStatus === 'ringing' || callStatus === 'answered') {
         activeCalls.set(requestUuid, {
@@ -655,21 +727,39 @@ app.post("/incoming-call", async (request, reply) => {
             direction: direction
         });
         
+        console.log(`📝 STORED ACTIVE ${isInbound ? 'INBOUND' : 'OUTBOUND'} CALL: ${requestUuid}`);
+        
         // Create transcript with correct type
         try {
             const transcript = await createTranscript(requestUuid, fromNumber, isInbound);
-        } catch (error) {}
+            if (transcript) {
+                console.log(`✅ ${isInbound ? 'INBOUND' : 'OUTBOUND'} TRANSCRIPT CREATED: ${requestUuid}`);
+            }
+        } catch (error) {
+            console.error(`❌ ERROR CREATING TRANSCRIPT: ${error.message}`);
+        }
     } else if (callStatus === 'completed' || callStatus === 'hangup') {
+        console.log(`📞 ${isInbound ? 'INBOUND' : 'OUTBOUND'} CALL COMPLETED: ${requestUuid}`);
+        
         await new Promise(resolve => setTimeout(resolve, 1000));
         
         try {
             const updatedTranscript = await updateCallEnd(requestUuid, isInbound);
-        } catch (error) {}
+            if (updatedTranscript) {
+                console.log(`✅ ${isInbound ? 'INBOUND' : 'OUTBOUND'} CALL END UPDATED: ${requestUuid}`);
+            }
+        } catch (error) {
+            console.error(`❌ ERROR UPDATING CALL END: ${error.message}`);
+        }
         
         setTimeout(async () => {
             try {
+                console.log(`🔄 STARTING SUMMARY FOR ${isInbound ? 'INBOUND' : 'OUTBOUND'} CALL: ${requestUuid}`);
                 await generateAutoSummary(requestUuid, isInbound);
-            } catch (summaryError) {}
+                console.log(`✅ SUMMARY COMPLETED FOR: ${requestUuid}`);
+            } catch (summaryError) {
+                console.error(`❌ ERROR GENERATING SUMMARY: ${summaryError.message}`);
+            }
         }, 5000);
         
         activeCalls.delete(requestUuid);
@@ -687,9 +777,11 @@ app.post("/incoming-call", async (request, reply) => {
 
 // ========== CRITICAL FIX: Modified make_call handler ==========
 app.post('/make_call', async (request, reply) => {
+    console.log('🔥 MAKE CALL: Request body:', request.body);
     const { to, userId, email } = request.body;
     
     if (!to) {
+        console.log('❌ MAKE CALL: Missing "to" number');
         return reply.status(400).send({ error: "Missing 'to' number" });
     }
     // Get actual userId from email if provided
@@ -701,17 +793,25 @@ app.post('/make_call', async (request, reply) => {
                 const user = await usersCollection.findOne({ email });
                 if (user) {
                     actualUserId = user._id.toString();
+                    console.log(`📧 MAKE CALL: Found user ${actualUserId} for email ${email}`);
                 } else {
-                    actualUserId = email;
+                    actualUserId = email; // Use email as fallback
+                    console.log(`📧 MAKE CALL: No user found for email ${email}, using email as userId`);
                 }
             }
         } catch (error) {
+            console.error('❌ MAKE CALL: Error looking up user:', error);
             actualUserId = email || 'default-user';
         }
     }
     
+    console.log(`📞 MAKE CALL: Making outbound call to ${to} for userId: ${actualUserId}`);
     try {
+        console.log(`📞 MAKE CALL: Making outbound call to ${to}`);
+        
+        // ========== IMPORTANT FIX ==========
         // For outbound calls, we need to track that this is OUR outbound call
+        // We'll store it in outboundCallTracker before making the call
         const tempRequestUuid = `outbound_temp_${Date.now()}`;
         outboundCallTracker.set(tempRequestUuid, {
             phoneNumber: to,
@@ -724,6 +824,7 @@ app.post('/make_call', async (request, reply) => {
             to.startsWith('+') ? to : `+91${to}`,
             `${NGROK_URL}/incoming-call`,
             {
+                // Add custom headers to identify this as outbound
                 custom_headers: {
                     'X-Call-Direction': 'outbound',
                     'X-Original-Request-Uuid': tempRequestUuid
@@ -731,8 +832,11 @@ app.post('/make_call', async (request, reply) => {
             }
         );
         
+        console.log('✅ MAKE CALL: Plivo response:', call);
+        
         const requestUuid = call.requestUuid || `outbound_${Date.now()}`;
 
+        // Store in activeCalls with isInbound: false
         activeCalls.set(requestUuid, {
             phoneNumber: to,
             requestUuid: requestUuid,
@@ -744,21 +848,33 @@ app.post('/make_call', async (request, reply) => {
             direction: 'outbound'
         });
         
+        console.log(`📝 OUTBOUND CALL STORED: requestUuid=${requestUuid}, phone=${to}, isInbound: false`);
+        
         // Create outbound transcript immediately
         try {
             const transcript = await createTranscript(requestUuid, to, false, actualUserId);
-        } catch (error) {}
+            if (transcript) {
+                console.log(`✅ OUTBOUND TRANSCRIPT CREATED: ${requestUuid}`);
+            }
+        } catch (error) {
+            console.error(`❌ ERROR CREATING OUTBOUND TRANSCRIPT: ${error.message}`);
+        }
         
         return reply.send(call);
     } catch (error) {
+        console.error("❌ MAKE CALL: Error making call:", error);
         return reply.status(500).send({ error: error.message });
     }
 });
 
 app.get('/api/transcripts', async (request, reply) => {
+    console.log('🔄 GET ALL INBOUND TRANSCRIPTS: Request received');
+    
+    
     const collection = await ensureCollection(true);
     
     if (!collection) {
+        console.log('❌ GET ALL INBOUND TRANSCRIPTS: Database not configured');
         return reply.status(500).send({ error: 'Database not configured' });
     }
 
@@ -766,8 +882,16 @@ app.get('/api/transcripts', async (request, reply) => {
         const { page = 1, limit = 20 } = request.query;
         const skip = (page - 1) * limit;
         
+        // Build filter for user isolation
         let filter = {};
+        if (request.query.email) {
+            // For inbound transcripts, we might not have userId, so show all for now
+            // TODO: Associate inbound calls with users based on phone number or other logic
+            console.log(`🔍 INBOUND TRANSCRIPTS: Filtering by email ${request.query.email}`);
+            // Temporarily show all inbound transcripts until we implement proper user association
+        }
         
+        console.log('🔍 INBOUND TRANSCRIPTS FILTER:', filter);        
         const transcripts = await collection
             .find(filter)
             .sort({ createdAt: -1 })
@@ -776,6 +900,8 @@ app.get('/api/transcripts', async (request, reply) => {
             .toArray();
         
         const total = await collection.countDocuments(filter);
+        
+        console.log(`✅ GET ALL INBOUND TRANSCRIPTS: Found ${transcripts.length} inbound transcripts`);
         
         const transcriptSummaries = transcripts.map(transcript => ({
             requestUuid: transcript.requestUuid,
@@ -802,6 +928,7 @@ app.get('/api/transcripts', async (request, reply) => {
             collection: 'inbound_transcripts'
         });
     } catch (error) {
+        console.error('❌ GET ALL INBOUND TRANSCRIPTS: Error:', error);
         return reply.status(500).send({ 
             success: false, 
             error: 'Failed to fetch inbound transcripts' 
@@ -810,9 +937,13 @@ app.get('/api/transcripts', async (request, reply) => {
 });
 
 app.get('/api/outbound-transcripts', async (request, reply) => {
+    console.log('🔄 GET ALL OUTBOUND TRANSCRIPTS: Request received');
+    
+    
     const collection = await ensureCollection(false);
     
     if (!collection) {
+        console.log('❌ GET ALL OUTBOUND TRANSCRIPTS: Database not configured');
         return reply.status(500).send({ error: 'Database not configured' });
     }
 
@@ -820,11 +951,13 @@ app.get('/api/outbound-transcripts', async (request, reply) => {
         const { page = 1, limit = 20 } = request.query;
         const skip = (page - 1) * limit;
         
+        // Build filter for user isolation
         let filter = {};
         if (request.query.userId) {
             filter.userId = new ObjectId(request.query.userId);
         }
         
+        console.log('🔍 OUTBOUND TRANSCRIPTS FILTER:', filter);        
         const transcripts = await collection
             .find(filter)
             .sort({ createdAt: -1 })
@@ -833,6 +966,8 @@ app.get('/api/outbound-transcripts', async (request, reply) => {
             .toArray();
         
         const total = await collection.countDocuments(filter);
+        
+        console.log(`✅ GET ALL OUTBOUND TRANSCRIPTS: Found ${transcripts.length} outbound transcripts`);
         
         const transcriptSummaries = transcripts.map(transcript => ({
             requestUuid: transcript.requestUuid,
@@ -859,6 +994,7 @@ app.get('/api/outbound-transcripts', async (request, reply) => {
             collection: 'call_transcripts'
         });
     } catch (error) {
+        console.error('❌ GET ALL OUTBOUND TRANSCRIPTS: Error:', error);
         return reply.status(500).send({ 
             success: false, 
             error: 'Failed to fetch outbound transcripts' 
@@ -868,6 +1004,7 @@ app.get('/api/outbound-transcripts', async (request, reply) => {
 
 app.get('/api/transcripts/:requestUuid', async (request, reply) => {
     const { requestUuid } = request.params;
+    console.log(`📄 GET TRANSCRIPT BY requestUuid: ${requestUuid}`);
     
     let transcript = null;
     let collectionType = 'inbound';
@@ -880,6 +1017,7 @@ app.get('/api/transcripts/:requestUuid', async (request, reply) => {
     
     // If not found in inbound, try outbound
     if (!transcript) {
+        console.log(`🔄 Transcript not found in inbound_transcripts, checking call_transcripts`);
         collection = await ensureCollection(false);
         collectionType = 'outbound';
         
@@ -889,11 +1027,14 @@ app.get('/api/transcripts/:requestUuid', async (request, reply) => {
     }
     
     if (!transcript) {
+        console.log(`❌ GET TRANSCRIPT: No transcript found for ${requestUuid}`);
         return reply.status(404).send({
             success: false,
             error: 'No transcript found for this call'
         });
     }
+    
+    console.log(`✅ GET TRANSCRIPT: Found transcript in ${collectionType} collection`);
     
     return reply.send({
         success: true,
@@ -982,22 +1123,29 @@ app.get('/debug/mongodb-status', async (request, reply) => {
         });
         
     } catch (error) {
+        console.error('Debug endpoint error:', error);
         return reply.status(500).send({ error: error.message });
     }
 });
 
 // ==================== WEBSOCKET HANDLING ====================
 server.on('upgrade', (request, socket, head) => {
+    console.log('🔄 WEBSOCKET UPGRADE: URL:', request.url);
+    
     if (request.url === '/media-stream') {
+        console.log('🎵 WEBSOCKET: Media stream connection');
         wss.handleUpgrade(request, socket, head, (ws) => {
             wss.emit('connection', ws, request);
         });
     } else if (request.url === '/transcript-stream') {
+        console.log('📡 WEBSOCKET: Transcript stream connection');
         transcriptWss.handleUpgrade(request, socket, head, (ws) => {
             transcriptClients.add(ws);
+            console.log('✅ WEBSOCKET: New transcript client connected. Total:', transcriptClients.size);
             
             ws.on('close', () => {
                 transcriptClients.delete(ws);
+                console.log('❌ WEBSOCKET: Transcript client disconnected.');
             });
             
             ws.send(JSON.stringify({ 
@@ -1007,6 +1155,7 @@ server.on('upgrade', (request, socket, head) => {
             }));
         });
     } else {
+        console.log('❌ WEBSOCKET: Unknown URL, destroying socket');
         socket.destroy();
     }
 });
@@ -1246,6 +1395,8 @@ const startRealtimeWSConnection = (plivoWS, requestUuid, phoneNumber, isInbound 
 };
 
 wss.on('connection', (connection) => {
+    console.log('✅ CLIENT CONNECTED: Media WebSocket');
+    
     let requestUuid = null;
     let phoneNumber = null;
     let isInbound = true;
@@ -1267,6 +1418,7 @@ wss.on('connection', (connection) => {
                     break;
                     
                 case 'start':
+                    console.log('🎬 STREAM STARTED:', data.start.streamId);
                     connection.streamId = data.start.streamId;
                     
                     let foundCall = null;
@@ -1275,6 +1427,7 @@ wss.on('connection', (connection) => {
                     for (let [reqUuid, callInfo] of activeCalls.entries()) {
                         if (Date.now() - callInfo.timestamp < 30000) {
                             foundCall = callInfo;
+                            console.log(`🔍 FOUND CALL: ${reqUuid}, isInbound: ${callInfo.isInbound}`);
                             break;
                         }
                     }
@@ -1284,14 +1437,22 @@ wss.on('connection', (connection) => {
                         phoneNumber = foundCall.phoneNumber;
                         isInbound = foundCall.isInbound !== false;
                         
+                        console.log('🔗 MATCHED CALL:', { requestUuid, phoneNumber, isInbound: isInbound ? 'INBOUND' : 'OUTBOUND' });
+                        
                         realtimeWS = startRealtimeWSConnection(connection, requestUuid, phoneNumber, isInbound);
+                    } else {
+                        console.log('⚠️ NO MATCHING ACTIVE CALL FOUND');
                     }
                     break;
             }
-        } catch (error) {}
+        } catch (error) {
+            console.error('❌ MEDIA MESSAGE: Error:', error);
+        }
     });
 
     connection.on('close', async () => {
+        console.log('❌ CLIENT DISCONNECTED: Media WebSocket');
+        
         if (realtimeWS && realtimeWS.readyState === WebSocket.OPEN) {
             realtimeWS.close();
         }
@@ -1299,10 +1460,14 @@ wss.on('connection', (connection) => {
         streamCallMap.delete(connection);
         
         if (requestUuid) {
+            console.log(`🛑 ${isInbound ? 'INBOUND' : 'OUTBOUND'} CALL ENDED: ${requestUuid}`);
+            
             await updateCallEnd(requestUuid, isInbound);
             
             setTimeout(() => {
-                generateAutoSummary(requestUuid, isInbound);
+                generateAutoSummary(requestUuid, isInbound).then(() => {
+                    console.log(`✅ ${isInbound ? 'INBOUND' : 'OUTBOUND'} SUMMARY GENERATED: ${requestUuid}`);
+                });
             }, 2000);
             
             activeCalls.delete(requestUuid);
@@ -1316,6 +1481,13 @@ async function startServer() {
         await initializeMongoDB();
         server.listen(PORT, () => {
             console.log(`✅ SERVER STARTED: Listening on port ${PORT}`);
+            console.log(`🌐 WEBHOOK URL: ${NGROK_URL}`);
+            // console.log(`📡 TRANSCRIPT WEBSOCKET: wss://bebf85c0cd9d.ngrok-free.app/transcript-stream`);
+            console.log(`📊 API ENDPOINTS:`);
+            console.log(`   - Inbound Transcripts: ${NGROK_URL}/api/transcripts`);
+            console.log(`   - Outbound Transcripts: ${NGROK_URL}/api/outbound-transcripts`);
+            console.log(`   - Make Outbound Call: ${NGROK_URL}/make_call (POST)`);
+            console.log(`   - Get Single Transcript: ${NGROK_URL}/api/transcripts/:requestUuid`);
         });
     } catch (error) {
         console.error('❌ SERVER START: Failed to start server:', error);
@@ -1325,7 +1497,10 @@ async function startServer() {
 
 startServer();
 app.post('/api/appointments/:appointmentId/confirm', async (request, reply) => {
+    console.log('✅ CONFIRM APPOINTMENT: Request received for ID:', request.params.appointmentId);
+    
     if (!appointmentsCollection) {
+        console.log('❌ CONFIRM APPOINTMENT: appointmentsCollection not initialized');
         return reply.status(500).send({ error: 'Database not configured' });
     }
 
@@ -1345,17 +1520,21 @@ app.post('/api/appointments/:appointmentId/confirm', async (request, reply) => {
         );
         
         if (result.matchedCount === 0) {
+            console.log('❌ CONFIRM APPOINTMENT: Appointment not found');
             return reply.status(404).send({ 
                 success: false, 
                 error: 'Appointment not found' 
             });
         }
         
+        console.log('✅ CONFIRM APPOINTMENT: Successfully confirmed appointment');
+        
         return reply.send({
             success: true,
             message: 'Appointment confirmed successfully'
         });
     } catch (error) {
+        console.error('❌ CONFIRM APPOINTMENT: Error:', error);
         return reply.status(500).send({ 
             success: false, 
             error: 'Failed to confirm appointment',

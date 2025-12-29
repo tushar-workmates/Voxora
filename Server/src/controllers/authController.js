@@ -3,13 +3,13 @@ import User from '../models/User.js';
 import ApiResponseHandle from '../utils/ApiResponseHandle.js';
 import ApiErrorHandle from '../utils/ApiErrorHandle.js';
 
-const generateToken = (userId) => {
+const generateToken = (userId, email) => {
   if (!process.env.JWT_SECRET) {
     console.error('JWT_SECRET not set in environment!');
     throw new Error('JWT_SECRET not configured');
   }
   console.log('Generating token for userId:', userId); // Debug log
-  const token = jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '7d' });
+  const token = jwt.sign({ id: userId, email }, process.env.JWT_SECRET, { expiresIn: '24h' });
   console.log('Generated token:', token); // Debug log
   return token;
 };
@@ -36,11 +36,7 @@ const register = async (request, reply) => {
 
     await user.save();
 
-    const token = generateToken(user._id);
-    
-    // Store user info in session
-    request.session.userId = user._id;
-    request.session.user = { id: user._id, email: user.email, companyWebsite: user.companyWebsite };
+    const token = generateToken(user._id, user.email);
     
     const response = new ApiResponseHandle(201, { 
       user: { id: user._id, email: user.email, companyWebsite: user.companyWebsite }, 
@@ -74,11 +70,7 @@ const login = async (request, reply) => {
       throw new ApiErrorHandle(401, 'Invalid credentials');
     }
 
-    const token = generateToken(user._id);
-    
-    // Store user info in session
-    request.session.userId = user._id;
-    request.session.user = { id: user._id, email: user.email, companyWebsite: user.companyWebsite };
+    const token = generateToken(user._id, user.email);
     
     const response = new ApiResponseHandle(200, { 
       user: { id: user._id, email: user.email, companyWebsite: user.companyWebsite }, 
@@ -96,13 +88,6 @@ const login = async (request, reply) => {
 
 const logout = async (request, reply) => {
   try {
-    // Clear session
-    request.session.destroy((err) => {
-      if (err) {
-        console.error('Session destroy error:', err);
-      }
-    });
-    
     const response = new ApiResponseHandle(200, null, 'Logout successful');
     reply.send(response);
   } catch (error) {

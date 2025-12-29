@@ -39,39 +39,9 @@ connectDB();
 connectDB();
 
 // ----------------------
-// Login Route
+// Auth Routes
 // ----------------------
-fastify.post('/login', async (request, reply) => {
-  const { email, password } = request.body;
-
-  if (!email || !password) {
-    reply.code(400);
-    return { success: false, message: 'Email and password required' };
-  }
-
-  try {
-    const user = await User.findOne({ email });
-    if (!user || !(await user.comparePassword(password))) {
-      reply.code(401);
-      return { success: false, message: 'Invalid credentials' };
-    }
-
-    const token = jwt.sign(
-      { email: user.email, id: user._id.toString() },
-      process.env.JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-
-    return {
-      success: true,
-      data: { token },
-      message: 'Login successful'
-    };
-  } catch (error) {
-    reply.code(500);
-    return { success: false, message: 'Server error' };
-  }
-});
+fastify.register(authRoutes);
 
 // ----------------------
 // Token Validation Route
@@ -95,44 +65,7 @@ fastify.get('/api/validate-token', async (request, reply) => {
   }
 });
 
-// ----------------------
-// Logout Route
-// ----------------------
-fastify.post('/logout', async (request, reply) => {
-  return {
-    success: true,
-    message: 'Logout successful'
-  };
-});
 
-// ----------------------
-// Get Profile Route
-// ----------------------
-fastify.get('/get-profile', async (request, reply) => {
-  const authHeader = request.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  
-  if (!token) {
-    return reply.status(401).send({ error: 'Access token required' });
-  }
-  
-  try {
-    const user = jwt.verify(token, process.env.JWT_SECRET);
-    const userData = await User.findById(user.id);
-    
-    if (!userData) {
-      return reply.status(404).send({ error: 'User not found' });
-    }
-    
-    return {
-      statusCode: 200,
-      data: { email: userData.email },
-      message: 'Profile retrieved successfully'
-    };
-  } catch (error) {
-    return reply.status(403).send({ error: 'Invalid token' });
-  }
-});
 
 // ----------------------
 // Lead Routes

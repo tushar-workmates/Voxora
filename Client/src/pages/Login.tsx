@@ -30,7 +30,7 @@ export default function Login() {
     try {
       const result = await login(formData.email, formData.password);
       if (result.success) {
-        console.log('Login result:', result); // Debug log
+        // console.log('Login result:', result); // Debug log
         toast.success("Welcome back to Voxora!");
         // Store user data if needed
         // localStorage.setItem('user', JSON.stringify(result.data.user));
